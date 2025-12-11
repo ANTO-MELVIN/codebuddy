@@ -3,6 +3,8 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -25,33 +27,54 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
+
+const saveUserToFirestore = async (user: any) => {
+  const userRef = doc(db, "users", user.uid);
+  const userSnap = await getDoc(userRef);
+
+  if (!userSnap.exists()) {
+    await setDoc(userRef, {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      createdAt: new Date().toISOString(),
+      lastLogin: new Date().toISOString()
+    });
+  } else {
+    await setDoc(userRef, {
+      lastLogin: new Date().toISOString()
+    }, { merge: true });
+  }
+};
+
+export const checkRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      await saveUserToFirestore(result.user);
+      return result.user;
+    }
+  } catch (error) {
+    console.error("Error getting redirect result:", error);
+  }
+  return null;
+};
 
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-    
-    // Store user info in Firestore
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      await setDoc(userRef, {
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        photoURL: user.photoURL,
-        createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString()
-      });
-    } else {
-      await setDoc(userRef, {
-        lastLogin: new Date().toISOString()
-      }, { merge: true });
+    await saveUserToFirestore(result.user);
+    return result.user;
+  } catch (error: any) {
+    if (error.code === 'auth/popup-blocked') {
+      console.log("Popup blocked, falling back to redirect...");
+      await signInWithRedirect(auth, googleProvider);
+      return null;
     }
-
-    return user;
-  } catch (error) {
     console.error("Error signing in with Google", error);
     throw error;
   }
@@ -154,5 +177,28 @@ export const loginWithEmail = async (email: string, password: string) => {
   } catch (error) {
     console.error("Error logging in with email", error);
     throw error;
+  }
+};
+
+export const saveUserContext = async (userId: string, context: { code: string; language: string }) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await setDoc(userRef, { context }, { merge: true });
+  } catch (error) {
+    console.error("Error saving context:", error);
+  }
+};
+
+export const getUserContext = async (userId: string) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const docSnap = await getDoc(userRef);
+    if (docSnap.exists()) {
+      return docSnap.data().context || null;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting context:", error);
+    return null;
   }
 };

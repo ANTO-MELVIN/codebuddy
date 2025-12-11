@@ -12,6 +12,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -19,7 +20,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setError(null);
     try {
       const user = await signInWithGoogle();
-      onLoginSuccess(user);
+      if (user) {
+        onLoginSuccess(user);
+      }
     } catch (err: any) {
       console.error("Login failed:", err);
       if (err.code === 'auth/popup-closed-by-user') {
@@ -28,6 +31,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setError('Sign in popup was blocked. Please allow popups for this site.');
       } else if (err.code === 'auth/operation-not-allowed') {
         setError('This sign-in method is not enabled in the Firebase Console. Please enable Email/Password or Google Sign-in.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not authorized. Please add your Vercel domain to Authorized Domains in Firebase Console.');
       } else {
         setError(`Error (${err.code}): ${err.message}`);
       }
@@ -41,7 +46,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       let user;
       if (isSignUp) {
-        user = await registerWithEmail(email, password);
+        user = await registerWithEmail(email, password, name);
       } else {
         user = await loginWithEmail(email, password);
       }
@@ -96,6 +101,18 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         )}
 
         <form onSubmit={handleEmailAuth} className="space-y-4 mb-6">
+          {isSignUp && (
+            <div>
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
+                required
+              />
+            </div>
+          )}
           <div>
             <input
               type="email"

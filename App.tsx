@@ -20,7 +20,7 @@ import { CodeEditor } from './components/Editor/CodeEditor';
 import { ChatBox } from './components/Chat/ChatBox';
 import { Login } from './components/Auth/Login';
 import { sendMessageToGemini } from './services/geminiService';
-import { auth, logout, saveUserChats, getUserChats, saveUserSnippets, getUserSnippets } from './services/firebase';
+import { auth, logout, saveUserChats, getUserChats, saveUserSnippets, getUserSnippets, saveUserContext, getUserContext, checkRedirectResult } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ChatSession, Message, Mode, Snippet, LANGUAGES, User } from './types';
 import { INITIAL_CODE_PYTHON as CODE_SAMPLE } from './constants';
@@ -41,9 +41,13 @@ function App() {
   
   // Snippets
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [dataLoading, setDataLoading] = useState(false);
 
   // --- AUTH & PERSISTENCE ---
   useEffect(() => {
+    // Check for redirect result (fallback for popup blocked)
+    checkRedirectResult();
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
@@ -64,11 +68,23 @@ function App() {
     if (!user) return;
     
     const loadUserData = async () => {
-      const dbChats = await getUserChats(user.id);
-      const dbSnippets = await getUserSnippets(user.id);
-      
-      if (dbChats.length > 0) setChats(dbChats);
-      if (dbSnippets.length > 0) setSnippets(dbSnippets);
+      setDataLoading(true);
+      try {
+        const dbChats = await getUserChats(user.id);
+        const dbSnippets = await getUserSnippets(user.id);
+        const dbContext = await getUserContext(user.id);
+        
+        if (dbChats.length > 0) setChats(dbChats);
+        if (dbSnippets.length > 0) setSnippets(dbSnippets);
+        if (dbContext) {
+          setCode(dbContext.code);
+          setActiveLanguage(dbContext.language);
+        }
+      } catch (error) {
+        console.error("Failed to load user data", error);
+      } finally {
+        setDataLoading(false);
+      }
     };
 
     loadUserData();
@@ -80,12 +96,13 @@ function App() {
     const saveData = async () => {
       await saveUserChats(user.id, chats);
       await saveUserSnippets(user.id, snippets);
+      await saveUserContext(user.id, { code, language: activeLanguage });
     };
     
     // Debounce could be added here for performance, but for now we save on every change
     const timeoutId = setTimeout(saveData, 1000);
     return () => clearTimeout(timeoutId);
-  }, [chats, snippets, user]);
+  }, [chats, snippets, user, code, activeLanguage]);
 
   // --- ACTIONS ---
 
@@ -95,8 +112,13 @@ function App() {
     setView('dashboard');
   };
 
-  if (authLoading) {
-    return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-cyan-500">Loading...</div>;
+  if (authLoading || dataLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-cyan-500 flex-col gap-4">
+        <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+        <p className="animate-pulse">{authLoading ? 'Authenticating...' : 'Loading your workspace...'}</p>
+      </div>
+    );
   }
 
   if (!user) {
@@ -179,35 +201,7 @@ function App() {
   // --- VIEWS ---
 
   if (!user) {
-    return (
-      <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden bg-black">
-        {/* Animated Background Mesh */}
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(6,182,212,0.1),transparent_70%)] animate-pulse" />
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-50" />
-        
-        <TiltCard className="p-8 glass-panel rounded-2xl max-w-md w-full text-center">
-          <div className="flex justify-center mb-6">
-            <div className="relative">
-              <div className="absolute inset-0 bg-cyan-500 blur-2xl opacity-40 animate-pulse" />
-              <Box size={64} className="text-cyan-400 relative z-10" />
-            </div>
-          </div>
-          <h1 className="text-4xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">
-            CodeBuddy
-          </h1>
-          <p className="text-gray-400 mb-8">
-            Your AI-powered coding companion. Explain, debug, optimize, and document with a single click.
-          </p>
-          <NeonButton onClick={handleLogin} className="w-full justify-center">
-            <Github size={20} />
-            Sign in with Simulated Auth
-          </NeonButton>
-          <div className="mt-4 text-xs text-gray-500">
-            Powered by Gemini 2.5 • React • Tailwind
-          </div>
-        </TiltCard>
-      </div>
-    );
+    return <Login onLoginSuccess={setUser} />;
   }
 
   const activeChat = chats.find(c => c.id === currentChatId);
@@ -222,7 +216,7 @@ function App() {
       </div>
 
       {/* Navbar */}
-      <nav className="relative z-50 h-16 border-b border-white/10 bg-black/50 backdrop-blur-lg flex items-center justify-between px-6">
+      <nav className="sticky top-0 z-50 h-14 border-b border-white/10 bg-black/80 backdrop-blur-xl flex items-center justify-between px-6 shadow-lg">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dashboard')}>
           <Box className="text-cyan-400" />
           <span className="font-bold text-lg tracking-tight">CodeBuddy</span>
@@ -254,7 +248,7 @@ function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 relative z-10 p-6 flex flex-col overflow-hidden">
+      <main className="flex-1 relative z-10 p-6 pt-12 flex flex-col overflow-hidden justify-center">
         
         {view === 'dashboard' && (
           <motion.div 
@@ -377,24 +371,45 @@ function App() {
               </button>
             </div>
             <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0 overflow-hidden pb-4">
+            
+            {/* Language Sidebar */}
+            <motion.div 
+              initial={{ x: -20, opacity: 0 }} 
+              animate={{ x: 0, opacity: 1 }}
+              className="hidden md:flex flex-col gap-2 bg-white/5 rounded-lg p-2 h-full overflow-y-auto shrink-0 w-32 border border-white/10"
+            >
+               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 px-2">Language</h3>
+               {LANGUAGES.map(lang => (
+                 <button
+                   key={lang.value}
+                   onClick={() => setActiveLanguage(lang.value)}
+                   className={`px-3 py-2 rounded-lg text-xs font-medium text-left transition-all ${activeLanguage === lang.value ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                 >
+                   {lang.label}
+                 </button>
+               ))}
+            </motion.div>
+
             {/* Left Col: Code */}
             <motion.div 
               initial={{ x: -20, opacity: 0 }} 
               animate={{ x: 0, opacity: 1 }}
               className="flex-1 flex flex-col min-w-0 h-full"
             >
-               <div className="flex items-center justify-between mb-3 shrink-0">
-                 <div className="flex bg-white/5 rounded-lg p-1">
-                   {LANGUAGES.map(lang => (
-                     <button
-                       key={lang.value}
-                       onClick={() => setActiveLanguage(lang.value)}
-                       className={`px-3 py-1 rounded text-xs transition-all ${activeLanguage === lang.value ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-                     >
-                       {lang.label}
-                     </button>
-                   ))}
+               <div className="flex items-center justify-end mb-3 shrink-0">
+                 {/* Mobile Language Dropdown (visible only on small screens) */}
+                 <div className="md:hidden mr-auto">
+                    <select 
+                      value={activeLanguage}
+                      onChange={(e) => setActiveLanguage(e.target.value)}
+                      className="bg-slate-800 text-white text-xs rounded px-2 py-1 border border-slate-700 outline-none"
+                    >
+                      {LANGUAGES.map(lang => (
+                        <option key={lang.value} value={lang.value}>{lang.label}</option>
+                      ))}
+                    </select>
                  </div>
+
                  <div className="flex gap-2 items-center">
                     <button
                       onClick={() => setView('dashboard')}

@@ -51,15 +51,35 @@ export const sendMessageToGemini = async (
       }
     });
 
-    const result = await chat.sendMessage(promptContext);
-    const response = await result.response;
-    return response.text();
+    // Retry logic for 429 errors
+    let retries = 3;
+    let delay = 2000; // Start with 2 seconds
+
+    while (retries > 0) {
+      try {
+        const result = await chat.sendMessage(promptContext);
+        const response = await result.response;
+        return response.text();
+      } catch (err: any) {
+        if (err.message.includes("429") || err.message.includes("Quota exceeded")) {
+          retries--;
+          if (retries === 0) throw err;
+          console.log(`Rate limit hit. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // Exponential backoff
+        } else {
+          throw err;
+        }
+      }
+    }
+    
+    throw new Error("Max retries exceeded");
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     
     if (error.message.includes("429") || error.message.includes("Quota exceeded")) {
-      return "⚠️ **Speed Limit Reached**: You are chatting too fast for the free tier. Please wait about 60 seconds and try again.";
+      return "⚠️ **Speed Limit Reached**: You are chatting too fast for the free tier. Please wait a moment and try again.";
     }
 
     return `Error communicating with CodeBuddy. Details: ${error.message || error}`;
