@@ -11,7 +11,8 @@ import {
   Bookmark, 
   Github,
   Moon,
-  Box
+  Box,
+  ArrowLeft
 } from 'lucide-react';
 import { TiltCard } from './components/UI/TiltCard';
 import { NeonButton } from './components/UI/NeonButton';
@@ -19,7 +20,7 @@ import { CodeEditor } from './components/Editor/CodeEditor';
 import { ChatBox } from './components/Chat/ChatBox';
 import { Login } from './components/Auth/Login';
 import { sendMessageToGemini } from './services/geminiService';
-import { auth, logout } from './services/firebase';
+import { auth, logout, saveUserChats, getUserChats, saveUserSnippets, getUserSnippets } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ChatSession, Message, Mode, Snippet, LANGUAGES, User } from './types';
 import { INITIAL_CODE_PYTHON as CODE_SAMPLE } from './constants';
@@ -61,18 +62,29 @@ function App() {
 
   useEffect(() => {
     if (!user) return;
-    // Load data from localStorage on mount (or replace with DB fetch later)
-    const savedChats = localStorage.getItem(`cb_chats_${user.id}`);
-    const savedSnippets = localStorage.getItem(`cb_snippets_${user.id}`);
-    if (savedChats) setChats(JSON.parse(savedChats));
-    if (savedSnippets) setSnippets(JSON.parse(savedSnippets));
+    
+    const loadUserData = async () => {
+      const dbChats = await getUserChats(user.id);
+      const dbSnippets = await getUserSnippets(user.id);
+      
+      if (dbChats.length > 0) setChats(dbChats);
+      if (dbSnippets.length > 0) setSnippets(dbSnippets);
+    };
+
+    loadUserData();
   }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    // Save data on change
-    localStorage.setItem(`cb_chats_${user.id}`, JSON.stringify(chats));
-    localStorage.setItem(`cb_snippets_${user.id}`, JSON.stringify(snippets));
+    // Save data on change to Firestore
+    const saveData = async () => {
+      await saveUserChats(user.id, chats);
+      await saveUserSnippets(user.id, snippets);
+    };
+    
+    // Debounce could be added here for performance, but for now we save on every change
+    const timeoutId = setTimeout(saveData, 1000);
+    return () => clearTimeout(timeoutId);
   }, [chats, snippets, user]);
 
   // --- ACTIONS ---
@@ -255,7 +267,7 @@ function App() {
                <p className="text-gray-400">What would you like to achieve today?</p>
              </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+             <div className="grid grid-cols-1 gap-4 w-full max-w-2xl">
                 {[
                   { id: 'explain', icon: MessageSquare, title: 'Explain', desc: 'Understand code logic', color: 'cyan' },
                   { id: 'debug', icon: Zap, title: 'Debug', desc: 'Fix errors instantly', color: 'red' },
@@ -268,14 +280,14 @@ function App() {
                       setActiveMode(item.id as Mode);
                       startNewChat();
                     }}
-                    className="glass-panel p-6 rounded-xl flex flex-col gap-4 group"
+                    className="glass-panel p-6 rounded-xl flex flex-row items-center gap-6 group text-left transition-all hover:bg-white/5"
                   >
-                    <div className={`w-12 h-12 rounded-lg bg-${item.color}-500/10 flex items-center justify-center text-${item.color}-400 group-hover:scale-110 transition-transform`}>
-                      <item.icon size={24} />
+                    <div className={`w-16 h-16 shrink-0 rounded-2xl bg-${item.color}-500/10 flex items-center justify-center text-${item.color}-400 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(0,0,0,0.3)]`}>
+                      <item.icon size={32} />
                     </div>
-                    <div>
-                      <h3 className="font-bold text-lg">{item.title}</h3>
-                      <p className="text-sm text-gray-500">{item.desc}</p>
+                    <div className="flex-1 flex items-center gap-4">
+                      <h3 className="font-bold text-xl">{item.title}</h3>
+                      <p className="text-gray-400 m-0">{item.desc}</p>
                     </div>
                   </TiltCard>
                 ))}
@@ -314,9 +326,17 @@ function App() {
 
         {view === 'snippets' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 overflow-y-auto max-w-5xl mx-auto w-full">
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-              <Bookmark className="text-cyan-400" /> Saved Snippets
-            </h2>
+            <div className="flex items-center gap-4 mb-6">
+              <button 
+                onClick={() => setView('dashboard')}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Bookmark className="text-cyan-400" /> Saved Snippets
+              </h2>
+            </div>
             <div className="grid gap-4">
               {snippets.length === 0 ? (
                 <p className="text-gray-500">No snippets saved yet. Start a chat!</p>
@@ -347,14 +367,23 @@ function App() {
         )}
 
         {view === 'chat' && (
-          <div className="flex-1 flex flex-col md:flex-row gap-6 h-[calc(100vh-100px)]">
+          <div className="flex flex-col h-full overflow-hidden w-full pt-8 px-4">
+            <div className="mb-6 flex items-center gap-2 shrink-0">
+              <button 
+                onClick={() => setView('dashboard')}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white flex items-center gap-2 text-lg font-medium"
+              >
+                <ArrowLeft size={20} /> Back to Dashboard
+              </button>
+            </div>
+            <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0 overflow-hidden pb-4">
             {/* Left Col: Code */}
             <motion.div 
               initial={{ x: -20, opacity: 0 }} 
               animate={{ x: 0, opacity: 1 }}
-              className="flex-1 flex flex-col min-w-0"
+              className="flex-1 flex flex-col min-w-0 h-full"
             >
-               <div className="flex items-center justify-between mb-3">
+               <div className="flex items-center justify-between mb-3 shrink-0">
                  <div className="flex bg-white/5 rounded-lg p-1">
                    {LANGUAGES.map(lang => (
                      <button
@@ -366,7 +395,15 @@ function App() {
                      </button>
                    ))}
                  </div>
-                 <div className="flex gap-2">
+                 <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => setView('dashboard')}
+                      className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-transparent text-gray-500 hover:text-white hover:bg-white/10 transition-all flex items-center gap-1"
+                      title="Back to Dashboard"
+                    >
+                      <ArrowLeft size={12} />
+                    </button>
+                    <div className="w-px h-4 bg-white/10" />
                     {(['explain', 'debug', 'optimize', 'document'] as Mode[]).map(m => (
                       <button
                         key={m}
@@ -379,7 +416,7 @@ function App() {
                  </div>
                </div>
                
-               <div className="flex-1 relative">
+               <div className="flex-1 relative min-h-0">
                  <CodeEditor 
                    code={code} 
                    setCode={setCode} 
@@ -392,29 +429,32 @@ function App() {
             <motion.div 
               initial={{ x: 20, opacity: 0 }} 
               animate={{ x: 0, opacity: 1 }}
-              className="flex-1 flex flex-col min-w-0 max-w-xl"
+              className="flex-1 flex flex-col min-w-0 h-full"
             >
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${
+              <div className="mb-4 flex items-center justify-between shrink-0">
+                <h3 className="text-2xl font-bold flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
                     activeMode === 'debug' ? 'bg-red-500 shadow-[0_0_10px_red]' : 
                     activeMode === 'optimize' ? 'bg-purple-500 shadow-[0_0_10px_purple]' : 'bg-cyan-500 shadow-[0_0_10px_cyan]'
                   }`} />
                   {activeMode.charAt(0).toUpperCase() + activeMode.slice(1)} Mode
                 </h3>
                 {activeChat && (
-                  <button onClick={startNewChat} className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-                     <Zap size={12} /> New Chat
+                  <button onClick={startNewChat} className="text-sm text-gray-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors">
+                     <Zap size={14} /> New Chat
                   </button>
                 )}
               </div>
-              <ChatBox 
-                messages={activeChat ? activeChat.messages : []} 
-                loading={loading}
-                onSendMessage={handleSendMessage}
-                onSaveSnippet={saveSnippet}
-              />
+              <div className="flex-1 min-h-0 relative">
+                <ChatBox 
+                    messages={activeChat ? activeChat.messages : []} 
+                    loading={loading}
+                    onSendMessage={handleSendMessage}
+                    onSaveSnippet={saveSnippet}
+                />
+              </div>
             </motion.div>
+          </div>
           </div>
         )}
 

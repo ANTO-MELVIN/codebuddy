@@ -1,15 +1,14 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Mode } from "../types";
 import { SYSTEM_PROMPTS } from "../constants";
 
 // Initialize Gemini Client
-// In a production app, we wouldn't re-init on every call, but we need to ensure the key is fresh
 const getAIClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
     throw new Error("Missing API Key");
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenerativeAI(apiKey);
 };
 
 export const sendMessageToGemini = async (
@@ -20,11 +19,12 @@ export const sendMessageToGemini = async (
   history: { role: string; content: string }[]
 ): Promise<string> => {
   try {
-    const ai = getAIClient();
-    
-    // Construct the context
-    const modePrompt = SYSTEM_PROMPTS[mode];
-    const systemInstruction = `${SYSTEM_PROMPTS.base}\n\n${modePrompt}`;
+    const genAI = getAIClient();
+    // Using gemini-2.0-flash-exp as it appears to be the only one available for this key
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash-exp",
+      systemInstruction: `${SYSTEM_PROMPTS.base}\n\n${SYSTEM_PROMPTS[mode]}`
+    });
 
     const promptContext = `
     LANGUAGE: ${language}
@@ -38,37 +38,30 @@ export const sendMessageToGemini = async (
     ${message}
     `;
 
-    // Map history to Gemini format if we were using multi-turn chat directly with history object,
-    // but for simplicity and specific context injection per turn (like changing code),
-    // we will treat this as a single generation with context or a fresh chat.
-    // To maintain state, we can pass previous messages.
-    
-    // For this specific app structure where code changes frequently, 
-    // it is often better to send the full context each time or use a transient chat.
-    // Let's use generateContent for direct control over the prompt structure.
+    // Convert history to Gemini format
+    const chatHistory = history.map(h => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.content }]
+    }));
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        ...history.map(h => ({
-          role: h.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: h.content }]
-        })),
-        {
-          role: 'user',
-          parts: [{ text: promptContext }]
-        }
-      ],
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.2, // Lower temperature for more precise coding answers
+    const chat = model.startChat({
+      history: chatHistory,
+      generationConfig: {
+        temperature: 0.2,
       }
     });
 
-    return response.text || "I couldn't generate a response.";
+    const result = await chat.sendMessage(promptContext);
+    const response = await result.response;
+    return response.text();
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    return "Error communicating with CodeBuddy. Please checks your API key or try again.";
+    
+    if (error.message.includes("429") || error.message.includes("Quota exceeded")) {
+      return "⚠️ **Speed Limit Reached**: You are chatting too fast for the free tier. Please wait about 60 seconds and try again.";
+    }
+
+    return `Error communicating with CodeBuddy. Details: ${error.message || error}`;
   }
 };
