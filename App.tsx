@@ -12,7 +12,8 @@ import {
   Github,
   Moon,
   Box,
-  ArrowLeft
+  ArrowLeft,
+  Play
 } from 'lucide-react';
 import { TiltCard } from './components/UI/TiltCard';
 import { NeonButton } from './components/UI/NeonButton';
@@ -113,32 +114,35 @@ function App() {
     setView('dashboard');
   };
 
-  if (authLoading || dataLoading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-cyan-500 flex-col gap-4">
-        <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
-        <p className="animate-pulse">{authLoading ? 'Authenticating...' : 'Loading your workspace...'}</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Login onLoginSuccess={(u) => setUser({ id: u.uid, email: u.email, name: u.displayName })} />;
-  }
-
   const startNewChat = () => {
     const newChat: ChatSession = {
       id: crypto.randomUUID(),
-      title: 'New Session',
+      title: 'New Chat',
       messages: [],
-      codeContext: code,
+      createdAt: Date.now(),
       language: activeLanguage,
       mode: activeMode,
-      createdAt: Date.now(),
+      codeContext: code
     };
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChat.id);
     setView('chat');
+  };
+
+  const handleRunAnalysis = () => {
+    if (!code.trim()) {
+      alert("Please enter some code first!");
+      return;
+    }
+
+    let prompt = "";
+    switch (activeMode) {
+      case 'explain': prompt = "Explain this code in detail."; break;
+      case 'debug': prompt = "Find and fix errors in this code."; break;
+      case 'optimize': prompt = "Optimize this code for performance and readability."; break;
+      case 'document': prompt = "Add documentation and comments to this code."; break;
+    }
+    handleSendMessage(prompt);
   };
 
   const handleSendMessage = async (msgText: string) => {
@@ -434,6 +438,20 @@ function App() {
                         {m}
                       </button>
                     ))}
+                    
+                    <div className="w-px h-4 bg-white/10 mx-1" />
+                    <button
+                      onClick={handleRunAnalysis}
+                      disabled={loading}
+                      className={`flex items-center gap-2 text-[10px] uppercase font-bold px-3 py-1 rounded transition-all shadow-lg ${
+                        loading 
+                          ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                          : 'bg-green-600 hover:bg-green-500 text-white hover:shadow-green-500/20'
+                      }`}
+                    >
+                      <Play size={10} fill="currentColor" /> 
+                      {loading ? 'Running...' : 'Run'}
+                    </button>
                  </div>
                </div>
                
