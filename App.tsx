@@ -33,6 +33,7 @@ function App() {
   const [activeMode, setActiveMode] = useState<Mode>('explain');
   const [activeLanguage, setActiveLanguage] = useState('python');
   const [code, setCode] = useState(CODE_SAMPLE);
+  const [errorInput, setErrorInput] = useState('');
   
   // Chat State
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -161,10 +162,15 @@ function App() {
 
     try {
       const activeChat = chats.find(c => c.id === currentChatId) || { messages: [] };
-      const history = activeChat.messages; // We use the state before optimistic update for safety or pass new
+      const history = activeChat.messages; 
+
+      // Include error context if present
+      const fullMessage = errorInput 
+        ? `${msgText}\n\nERROR CONTEXT:\n${errorInput}` 
+        : msgText;
 
       const responseText = await sendMessageToGemini(
-        msgText,
+        fullMessage,
         code,
         activeLanguage,
         activeMode,
@@ -431,12 +437,35 @@ function App() {
                  </div>
                </div>
                
-               <div className="flex-1 relative min-h-0">
-                 <CodeEditor 
-                   code={code} 
-                   setCode={setCode} 
-                   language={activeLanguage} 
-                 />
+               <div className="flex-1 relative min-h-0 flex flex-col gap-4">
+                 <div className="flex-1 relative min-h-0">
+                   <CodeEditor 
+                     code={code} 
+                     setCode={setCode} 
+                     language={activeLanguage} 
+                   />
+                 </div>
+                 
+                 {/* Error / Output Console */}
+                 <div className="h-32 shrink-0 bg-slate-900/50 border border-slate-800 rounded-lg flex flex-col overflow-hidden">
+                   <div className="px-3 py-1 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
+                     <span className="text-xs font-bold text-red-400 uppercase tracking-wider flex items-center gap-2">
+                       <Zap size={12} /> Error / Output Log
+                     </span>
+                     <button 
+                       onClick={() => setErrorInput('')}
+                       className="text-[10px] text-slate-500 hover:text-white"
+                     >
+                       Clear
+                     </button>
+                   </div>
+                   <textarea
+                     value={errorInput}
+                     onChange={(e) => setErrorInput(e.target.value)}
+                     placeholder="Paste any error messages or console output here..."
+                     className="flex-1 bg-transparent p-3 text-xs font-mono text-red-300 placeholder-slate-600 resize-none focus:outline-none"
+                   />
+                 </div>
                </div>
             </motion.div>
 

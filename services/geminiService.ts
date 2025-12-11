@@ -51,9 +51,10 @@ export const sendMessageToGemini = async (
       }
     });
 
-    // Retry logic for 429 errors
-    let retries = 3;
-    let delay = 2000; // Start with 2 seconds
+    // Retry logic for 429 errors (Rate Limits)
+    // Free tier has strict limits, so we need to be patient
+    let retries = 5;
+    let delay = 3000; // Start with 3 seconds
 
     while (retries > 0) {
       try {
@@ -64,9 +65,13 @@ export const sendMessageToGemini = async (
         if (err.message.includes("429") || err.message.includes("Quota exceeded")) {
           retries--;
           if (retries === 0) throw err;
-          console.log(`Rate limit hit. Retrying in ${delay}ms...`);
+          
+          console.log(`Rate limit hit. Retrying in ${delay}ms... (Attempts left: ${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2; // Exponential backoff
+          
+          // Increase delay for next attempt (Exponential backoff)
+          // 3s -> 6s -> 12s -> 24s -> 48s
+          delay *= 2; 
         } else {
           throw err;
         }
@@ -79,7 +84,7 @@ export const sendMessageToGemini = async (
     console.error("Gemini API Error:", error);
     
     if (error.message.includes("429") || error.message.includes("Quota exceeded")) {
-      return "⚠️ **Speed Limit Reached**: You are chatting too fast for the free tier. Please wait a moment and try again.";
+      return "⚠️ **High Traffic**: The AI is currently very busy (Free Tier Limit). I tried 5 times but couldn't get through. Please wait 1-2 minutes and try again.";
     }
 
     return `Error communicating with CodeBuddy. Details: ${error.message || error}`;
